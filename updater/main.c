@@ -9,6 +9,7 @@
 static const wchar_t remote_path[] =
     L"/repos/VolodyKira/game_3/contents/games-redirect.user.js?ref=arena%2F27e65b2f-game-3";
 static const wchar_t filename[] = L"games-redirect.user.js";
+static char message[256];
 static char remote_script[LIMIT + 1];
 static char local_script[LIMIT + 1];
 
@@ -49,22 +50,22 @@ static int fetch_script(DWORD *size) {
         !WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
             WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size, WINHTTP_NO_HEADER_INDEX)) goto winhttp_error;
     if (status != 200) {
-        fprintf(stderr, "GitHub returned HTTP %lu. Check repository access, branch, or rate limits.\n", (unsigned long)status);
+        snprintf(message, sizeof(message), "GitHub returned HTTP %lu. Check repository access, branch, or rate limits.", (unsigned long)status);
         goto done;
     }
     do {
         if (!WinHttpReadData(request, remote_script + *size, (DWORD)sizeof(remote_script) - *size, &count)) goto winhttp_error;
         *size += count;
-        if (*size > LIMIT) { fputs("The download is too large. No file changed.\n", stderr); goto done; }
+        if (*size > LIMIT) { strcpy(message, "The download is too large. No file changed."); goto done; }
     } while (count != 0);
     if (!is_expected_script(remote_script, *size)) {
-        fputs("The response is not the expected userscript. No file changed.\n", stderr);
+        strcpy(message, "The response is not the expected userscript. No file changed.");
         goto done;
     }
     ok = 1;
     goto done;
 winhttp_error:
-    fprintf(stderr, "Could not contact GitHub (Windows error %lu).\n", (unsigned long)GetLastError());
+    snprintf(message, sizeof(message), "Could not contact GitHub (Windows error %lu).", (unsigned long)GetLastError());
 done:
     if (request) WinHttpCloseHandle(request);
     if (connection) WinHttpCloseHandle(connection);
@@ -106,38 +107,42 @@ static int save_script(const wchar_t *folder, const wchar_t *path, DWORD size) {
 static int update(void) {
     wchar_t folder[MAX_PATH], path[MAX_PATH];
     DWORD length = GetModuleFileNameW(NULL, folder, MAX_PATH);
-    if (!length || length >= MAX_PATH) { fputs("Could not find the program folder.\n", stderr); return 1; }
+    if (!length || length >= MAX_PATH) { strcpy(message, "Could not find the program folder."); return 1; }
     wchar_t *separator = wcsrchr(folder, L'\\');
-    if (!separator) { fputs("Could not find the program folder.\n", stderr); return 1; }
+    if (!separator) { strcpy(message, "Could not find the program folder."); return 1; }
     separator[1] = L'\0';
-    if (wcslen(folder) + wcslen(filename) >= MAX_PATH) { fputs("The program path is too long.\n", stderr); return 1; }
+    if (wcslen(folder) + wcslen(filename) >= MAX_PATH) { strcpy(message, "The program path is too long."); return 1; }
     wcscpy(path, folder);
     wcscat(path, filename);
 
-    puts("Checking GitHub: VolodyKira/game_3 (games-redirect.user.js)...");
-    fflush(stdout);
     DWORD remote_size, local_size;
     if (!fetch_script(&remote_size)) return 1;
     int local = read_local(path, &local_size);
-    if (local < 0) { fputs("The existing file could not be read or is not the expected userscript. Left unchanged.\n", stderr); return 1; }
+    if (local < 0) { strcpy(message, "The existing file could not be read or is not the expected userscript. Left unchanged."); return 1; }
     if (local && local_size == remote_size && !memcmp(local_script, remote_script, remote_size)) {
-        puts("Already up to date. Nothing changed.");
+        strcpy(message, "Already up to date. Nothing changed.");
         return 0;
     }
     if (!save_script(folder, path, remote_size)) {
-        fputs("Could not save the update. Put the program in a writable folder, such as Downloads.\n", stderr);
+        strcpy(message, "Could not save the update. Put the program in a writable folder, such as Downloads.");
         return 1;
     }
-    puts("Saved games-redirect.user.js next to this program. Import the file in Tampermonkey.");
+    strcpy(message, "Saved games-redirect.user.js next to this program. Import it in Tampermonkey if you did not install it from the GitHub link.");
     return 0;
 }
 
-int main(void) {
-    int result = update();
-    DWORD processes[2];
-    if (GetConsoleProcessList(processes, 2) == 1) {
-        fputs("Press Enter to close.\n", stdout);
-        (void)getchar();
+int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command, int show) {
+    (void)instance;
+    (void)previous;
+    (void)show;
+    const int scheduled = !strcmp(command, "--scheduled");
+    if (!scheduled && *command) {
+        MessageBoxA(NULL, "Unknown argument. Run without arguments for a manual check.",
+            "Game3 Userscript Updater", MB_OK | MB_ICONWARNING);
+        return 2;
     }
+    int result = update();
+    if (!scheduled) MessageBoxA(NULL, message, "Game3 Userscript Updater",
+        MB_OK | (result ? MB_ICONWARNING : MB_ICONINFORMATION));
     return result;
 }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yandex Games Redirect
 // @namespace    urn:volodykira:game-3
-// @version      1.0.1
+// @version      1.1.0
 // @description  Open game 597546 instead of other Yandex Games pages.
 // @match        https://yandex.ru/games*
 // @match        https://www.yandex.ru/games*
@@ -11,6 +11,8 @@
 // @match        https://yandex.kz/games*
 // @match        https://yandex.uz/games*
 // @match        https://yandex.com.tr/games*
+// @updateURL    https://raw.githubusercontent.com/VolodyKira/game_3/refs/heads/arena/27e65b2f-game-3/games-redirect.user.js
+// @downloadURL  https://raw.githubusercontent.com/VolodyKira/game_3/refs/heads/arena/27e65b2f-game-3/games-redirect.user.js
 // @run-at       document-start
 // @noframes
 // @grant        none
