@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Yandex Games Redirect
 // @namespace    urn:volodykira:game-3
-// @version      1.2.0
-// @description  Open game 597546 from the Yandex Games catalogue without interrupting it.
+// @version      2.0.0
+// @description  Open the local games catalogue without interrupting game 597546 or ads.
 // @match        https://yandex.ru/games*
 // @match        https://www.yandex.ru/games*
 // @match        https://yandex.com/games*
@@ -15,45 +15,79 @@
 // @downloadURL  https://raw.githubusercontent.com/VolodyKira/game_3/refs/heads/arena/27e65b2f-game-3/games-redirect.user.js
 // @run-at       document-start
 // @noframes
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @connect      127.0.0.1
 // ==/UserScript==
 
 (() => {
   'use strict';
 
   const gameId = '597546';
-  const destination = 'https://yandex.ru/games/app/tikhii-otskok-597546';
+  const local = 'http://127.0.0.1:8765';
+  const health = `${local}/game3-health`;
+  const hosts = new Set(['yandex.ru', 'www.yandex.ru', 'yandex.com', 'www.yandex.com', 'yandex.by', 'yandex.kz', 'yandex.uz', 'yandex.com.tr']);
   const appPath = /^\/app\/(?:[^/]+-)?(\d+)$/i;
-  const cataloguePath = /^\/(?:catalog|categories|category(?:\/[^/]+)?|tag(?:\/[^/]+)?|search|promos)?$/i;
+  const adMarker = /^(?:ad|ads|adv|adfox|advert|advertising|advertisement|adbreak|preroll|midroll|interstitial|rewarded)(?:$|[-_/=?&])/i;
 
-  function relativePath() {
-    return window.location.pathname
-      .replace(/^\/games(?=\/|$)/, '')
-      .replace(/^\/(?:ar|az|be|en|es|fa|hi|hy|id|ka|kk|ky|ru|sr|tg|tk|tr|uk|uz)(?:-[a-z]{2})?(?=\/|$)/i, '')
+  function pathOf(url) {
+    if (url.protocol !== 'https:' || !hosts.has(url.hostname) || !/^\/games(?:\/|$)/.test(url.pathname)) return null;
+    return url.pathname.slice(6)
+      .replace(/^\/(?:ar|az|be|en|es|fa|he|hi|hy|id|ja|ka|kk|ky|ru|sr|tg|th|tk|tr|uk|uz|vi|zh)(?:-[a-z]{2})?(?=\/|$)/i, '')
       .replace(/\/+$/, '') || '/';
   }
 
-  // Once the game opens, leave the entire document alone. Ads and overlays can
-  // change history and hashes without starting a new game or leaving the page.
-  let inGame = false;
-  function redirectFromCatalogue() {
-    if (inGame || !/^\/games(?:\/|$)/.test(window.location.pathname)) return;
-    const path = relativePath();
-    const appId = appPath.exec(path)?.[1];
-    if (appId === gameId) {
-      inGame = true;
-      return;
-    }
-
-    // Unknown routes, embedded frames and ad infrastructure are not redirected.
-    if (appId || cataloguePath.test(path)) window.location.replace(destination);
+  function isGame(url, path = pathOf(url)) {
+    if (!path) return false;
+    if (appPath.exec(path)?.[1] === gameId) return true;
+    const hashParams = new URLSearchParams(url.hash.slice(1));
+    return ['app', 'app-id'].some(key => url.searchParams.getAll(key).includes(gameId) || hashParams.getAll(key).includes(gameId));
   }
 
-  redirectFromCatalogue();
+  function routeFor(url, path) {
+    if (!path) return null;
+    const hash = url.hash.slice(1).replace(/^\/+/, '');
+    if (adMarker.test(hash) || [...url.searchParams.keys(), ...new URLSearchParams(hash).keys()].some(key => adMarker.test(key))) return null;
+    if (appPath.test(path) || path === '/all-games') return 'catalog';
+    if (path === '/') return 'home';
+    if (path === '/search') {
+      const term = ['text', 'q', 'query'].map(key => url.searchParams.get(key)).find(Boolean);
+      return term ? `search/${encodeURIComponent(term)}` : 'search/';
+    }
+    if (/^\/(?:catalog|shop|promos|categories|tags)$/i.test(path)) return path.slice(1).toLowerCase();
+    if (/^\/tag\/[^/]+$/i.test(path)) return 'tags';
+    if (/^\/category\/[a-z0-9_-]+$/i.test(path)) return path.slice(1).toLowerCase();
+    return null; // Not a known catalogue route: keep internal, player, and ad pages untouched.
+  }
+
+  // Never take over a document once it has opened the game, even if an ad
+  // replaces its address via the History API. Also protect page loads from it.
+  let inGame = false;
+  try { inGame = isGame(new URL(document.referrer)); } catch { /* No usable referrer. */ }
+  let attempted = '';
+  function redirectIfAvailable() {
+    const url = new URL(window.location.href);
+    const path = pathOf(url);
+    if (isGame(url, path)) inGame = true;
+    if (inGame) return;
+    const route = routeFor(url, path);
+    if (!route || attempted === url.href || typeof GM_xmlhttpRequest !== 'function') return;
+    attempted = url.href;
+    GM_xmlhttpRequest({
+      method: 'GET', url: health, timeout: 1200, anonymous: true, nocache: true,
+      onload(response) {
+        if (!inGame && window.location.href === url.href && response.status === 200 &&
+            (!response.finalUrl || response.finalUrl === health) && typeof response.responseText === 'string' && response.responseText.trim() === 'game3-local-catalogue-v1') {
+          window.location.replace(`${local}/game3-catalogue.html#${route}`);
+        }
+      },
+    });
+  }
+
+  redirectIfAvailable();
   if (typeof window.navigation?.addEventListener === 'function') {
-    window.navigation.addEventListener('currententrychange', redirectFromCatalogue);
+    window.navigation.addEventListener('currententrychange', redirectIfAvailable);
   } else {
-    window.addEventListener('popstate', redirectFromCatalogue);
-    window.addEventListener('hashchange', redirectFromCatalogue);
+    window.addEventListener('popstate', redirectIfAvailable);
+    window.addEventListener('hashchange', redirectIfAvailable);
   }
 })();
