@@ -7,14 +7,28 @@ set "EDGE_STORE=https://microsoftedge.microsoft.com/addons/detail/tampermonkey/i
 set "OPERA_STORE=https://addons.opera.com/extensions/details/tampermonkey-beta/"
 set "CHOICE=%SystemRoot%\System32\choice.exe"
 set "FOUND_ANY="
+set "GAME3_PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+set "GAME3_SOURCE=%~dp0"
+if /i "%~1"=="/remove-server" goto removeServer
 if not exist "%~dp0game3-catalogue.html" (
-    echo Extract both files from the ZIP into the same folder first.
+    echo Extract the entire ZIP first.
     pause
     exit /b 1
 )
 
-echo Game3 - Tampermonkey Setup. No new task or autostart entry will be created.
+if not exist "%~dp0Game3-Local-Server.exe" (
+    echo Extract the entire ZIP first. The local server EXE is missing.
+    pause
+    exit /b 1
+)
+echo Game3 - Tampermonkey Setup
 call :removeOldTask
+"%CHOICE%" /c YN /n /m "Start the localhost catalogue now and automatically at Windows sign-in? [Y/N] "
+if errorlevel 2 goto findBrowsers
+if not errorlevel 1 exit /b 1
+call :installServer
+if errorlevel 1 goto serverFailed
+:findBrowsers
 
 call :find chrome.exe "Google\Chrome\Application\chrome.exe"
 if defined FOUND call :guide "Google Chrome" "%CHROME_STORE%" "chrome://extensions/"
@@ -71,7 +85,6 @@ if errorlevel 2 exit /b 0
 :settings
 start "" "%FOUND%" "%~3"
 echo Open Tampermonkey's details. Enable Allow User Scripts if the browser offers that switch.
-echo Enable Allow access to file URLs for Tampermonkey.
 echo Make sure Tampermonkey is enabled and has site access to yandex.ru.
 "%CHOICE%" /c RK /n /m "[R] Open the userscript  [K] Skip: "
 if not errorlevel 1 exit /b 0
@@ -81,12 +94,24 @@ if errorlevel 2 exit /b 0
 start "" "%FOUND%" "%SOURCE%"
 echo The published version was opened once in %~1.
 echo If Tampermonkey shows Install or Update, confirm there. If it only offers Reinstall, you can cancel.
-echo For first-time setup, open the companion HTML in this same browser and profile.
-"%CHOICE%" /c RK /n /m "[R] Open and register local HTML  [K] Skip: "
-if not errorlevel 1 exit /b 0
-if errorlevel 2 exit /b 0
-start "" "%FOUND%" "%~dp0game3-catalogue.html"
+echo If prompted, allow the script to check 127.0.0.1 on this PC.
 exit /b 0
+
+:installServer
+"%GAME3_PS%" -NoProfile -NonInteractive -Command "$ErrorActionPreference='Stop'; try { $name='Game3 Local Catalogue'; $root='\'; $directory=Join-Path $env:LOCALAPPDATA 'Game3LocalCatalogue'; $exe=Join-Path $directory 'Game3-Local-Server.exe'; $owner=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name; $existing=Get-ScheduledTask -TaskPath $root -TaskName $name -ErrorAction SilentlyContinue; if ($existing -and $existing.State -eq 'Running') { Stop-ScheduledTask -InputObject $existing }; New-Item -ItemType Directory -Path $directory -Force | Out-Null; foreach ($file in @('Game3-Local-Server.exe','game3-catalogue.html')) { $from=Join-Path $env:GAME3_SOURCE $file; $to=Join-Path $directory $file; if ($from -ine $to) { Copy-Item -LiteralPath $from -Destination $to -Force } }; $action=New-ScheduledTaskAction -Execute $exe -WorkingDirectory $directory; $trigger=New-ScheduledTaskTrigger -AtLogOn -User $owner; $principal=New-ScheduledTaskPrincipal -UserId $owner -LogonType Interactive -RunLevel Limited; $settings=New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries; Register-ScheduledTask -TaskName $name -TaskPath $root -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Serves the Game3 catalogue only at 127.0.0.1:8765.' -Force | Out-Null; Start-ScheduledTask -TaskName $name -TaskPath $root; exit 0 } catch { Write-Error $_ -ErrorAction Continue; exit 1 }"
+exit /b %errorlevel%
+
+:serverFailed
+echo Could not set up the localhost server. Check the message above.
+pause
+exit /b 1
+
+:removeServer
+"%CHOICE%" /c YN /n /m "Stop the local catalogue and remove its sign-in task? [Y/N] "
+if errorlevel 2 exit /b 0
+if not errorlevel 1 exit /b 1
+"%GAME3_PS%" -NoProfile -NonInteractive -Command "$ErrorActionPreference='Stop'; try { $task=Get-ScheduledTask -TaskPath '\' -TaskName 'Game3 Local Catalogue' -ErrorAction SilentlyContinue; if ($task) { if ($task.State -eq 'Running') { Stop-ScheduledTask -InputObject $task }; Unregister-ScheduledTask -InputObject $task -Confirm:$false }; Write-Output 'Local catalogue sign-in task removed. No files were deleted.'; exit 0 } catch { Write-Error $_ -ErrorAction Continue; exit 1 }"
+exit /b %errorlevel%
 
 :removeOldTask
 "%SystemRoot%\System32\schtasks.exe" /Query /TN "Game3 Userscript Update" >nul 2>&1
