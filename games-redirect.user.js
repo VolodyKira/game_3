@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Yandex Games Redirect
 // @namespace    urn:volodykira:game-3
-// @version      2.0.0
-// @description  Open the local games catalogue without interrupting game 597546 or ads.
+// @version      2.1.0
+// @description  Open the saved catalogue file without interrupting game 597546 or ads.
 // @match        https://yandex.ru/games*
 // @match        https://www.yandex.ru/games*
 // @match        https://yandex.com/games*
@@ -11,20 +11,41 @@
 // @match        https://yandex.kz/games*
 // @match        https://yandex.uz/games*
 // @match        https://yandex.com.tr/games*
-// @updateURL    https://raw.githubusercontent.com/VolodyKira/game_3/refs/heads/arena/27e65b2f-game-3/games-redirect.user.js
-// @downloadURL  https://raw.githubusercontent.com/VolodyKira/game_3/refs/heads/arena/27e65b2f-game-3/games-redirect.user.js
+// @match        file:///*/game3-catalogue.html
+// @updateURL    https://raw.githubusercontent.com/VolodyKira/game_3/refs/heads/main/games-redirect.user.js
+// @downloadURL  https://raw.githubusercontent.com/VolodyKira/game_3/refs/heads/main/games-redirect.user.js
 // @run-at       document-start
 // @noframes
-// @grant        GM_xmlhttpRequest
-// @connect      127.0.0.1
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_openInTab
 // ==/UserScript==
 
 (() => {
   'use strict';
 
   const gameId = '597546';
-  const local = 'http://127.0.0.1:8765';
-  const health = `${local}/game3-health`;
+  const fileKey = 'game3CatalogueFile';
+  const current = new URL(window.location.href);
+
+  function validateLocalFile(value) {
+    try {
+      const url = new URL(value);
+      if (url.protocol === 'file:' && !url.host && /\/game3-catalogue\.html$/i.test(url.pathname)) {
+        url.search = '';
+        url.hash = '';
+        return url;
+      }
+    } catch { /* Missing or invalid local address. */ }
+    return null;
+  }
+
+  if (current.protocol === 'file:') {
+    const file = validateLocalFile(current.href);
+    if (file) GM_setValue(fileKey, file.href);
+    return;
+  }
+
   const hosts = new Set(['yandex.ru', 'www.yandex.ru', 'yandex.com', 'www.yandex.com', 'yandex.by', 'yandex.kz', 'yandex.uz', 'yandex.com.tr']);
   const appPath = /^\/app\/(?:[^/]+-)?(\d+)$/i;
   const adMarker = /^(?:ad|ads|adv|adfox|advert|advertising|advertisement|adbreak|preroll|midroll|interstitial|rewarded)(?:$|[-_/=?&])/i;
@@ -63,31 +84,29 @@
   // replaces its address via the History API. Also protect page loads from it.
   let inGame = false;
   try { inGame = isGame(new URL(document.referrer)); } catch { /* No usable referrer. */ }
-  let attempted = '';
-  function redirectIfAvailable() {
+  let opened = false;
+  function openLocalCatalogue() {
     const url = new URL(window.location.href);
     const path = pathOf(url);
     if (isGame(url, path)) inGame = true;
-    if (inGame) return;
+    if (inGame || opened) return;
     const route = routeFor(url, path);
-    if (!route || attempted === url.href || typeof GM_xmlhttpRequest !== 'function') return;
-    attempted = url.href;
-    GM_xmlhttpRequest({
-      method: 'GET', url: health, timeout: 1200, anonymous: true, nocache: true,
-      onload(response) {
-        if (!inGame && window.location.href === url.href && response.status === 200 &&
-            (!response.finalUrl || response.finalUrl === health) && typeof response.responseText === 'string' && response.responseText.trim() === 'game3-local-catalogue-v1') {
-          window.location.replace(`${local}/game3-catalogue.html#${route}`);
-        }
-      },
-    });
+    if (!route) return;
+    const file = validateLocalFile(GM_getValue(fileKey, ''));
+    if (!file) return;
+
+    // A regular web page cannot navigate its own tab to file://. The extension
+    // can open a local tab instead; leave the original document untouched.
+    opened = true;
+    file.hash = route;
+    GM_openInTab(file.href, { active: true, insert: true, setParent: true });
   }
 
-  redirectIfAvailable();
+  openLocalCatalogue();
   if (typeof window.navigation?.addEventListener === 'function') {
-    window.navigation.addEventListener('currententrychange', redirectIfAvailable);
+    window.navigation.addEventListener('currententrychange', openLocalCatalogue);
   } else {
-    window.addEventListener('popstate', redirectIfAvailable);
-    window.addEventListener('hashchange', redirectIfAvailable);
+    window.addEventListener('popstate', openLocalCatalogue);
+    window.addEventListener('hashchange', openLocalCatalogue);
   }
 })();

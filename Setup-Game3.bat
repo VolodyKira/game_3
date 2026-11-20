@@ -1,13 +1,17 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
 title Game3 - Tampermonkey Setup
-set "SOURCE=https://raw.githubusercontent.com/VolodyKira/game_3/refs/heads/arena/27e65b2f-game-3/games-redirect.user.js"
+set "SOURCE=https://raw.githubusercontent.com/VolodyKira/game_3/refs/heads/main/games-redirect.user.js"
 set "CHROME_STORE=https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo"
 set "EDGE_STORE=https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd"
-set "FIREFOX_STORE=https://addons.mozilla.org/firefox/addon/tampermonkey/"
 set "OPERA_STORE=https://addons.opera.com/extensions/details/tampermonkey-beta/"
 set "CHOICE=%SystemRoot%\System32\choice.exe"
 set "FOUND_ANY="
+if not exist "%~dp0game3-catalogue.html" (
+    echo Extract both files from the ZIP into the same folder first.
+    pause
+    exit /b 1
+)
 
 echo Game3 - Tampermonkey Setup. No new task or autostart entry will be created.
 call :removeOldTask
@@ -16,8 +20,6 @@ call :find chrome.exe "Google\Chrome\Application\chrome.exe"
 if defined FOUND call :guide "Google Chrome" "%CHROME_STORE%" "chrome://extensions/"
 call :find msedge.exe "Microsoft\Edge\Application\msedge.exe"
 if defined FOUND call :guide "Microsoft Edge" "%EDGE_STORE%" "edge://extensions/"
-call :find firefox.exe "Mozilla Firefox\firefox.exe"
-if defined FOUND call :guide "Mozilla Firefox" "%FIREFOX_STORE%" "about:addons"
 call :find brave.exe "BraveSoftware\Brave-Browser\Application\brave.exe"
 if defined FOUND call :guide "Brave" "%CHROME_STORE%" "brave://extensions/"
 call :find vivaldi.exe "Vivaldi\Application\vivaldi.exe"
@@ -69,6 +71,7 @@ if errorlevel 2 exit /b 0
 :settings
 start "" "%FOUND%" "%~3"
 echo Open Tampermonkey's details. Enable Allow User Scripts if the browser offers that switch.
+echo Enable Allow access to file URLs for Tampermonkey.
 echo Make sure Tampermonkey is enabled and has site access to yandex.ru.
 "%CHOICE%" /c RK /n /m "[R] Open the userscript  [K] Skip: "
 if not errorlevel 1 exit /b 0
@@ -78,6 +81,11 @@ if errorlevel 2 exit /b 0
 start "" "%FOUND%" "%SOURCE%"
 echo The published version was opened once in %~1.
 echo If Tampermonkey shows Install or Update, confirm there. If it only offers Reinstall, you can cancel.
+echo For first-time setup, open the companion HTML in this same browser and profile.
+"%CHOICE%" /c RK /n /m "[R] Open and register local HTML  [K] Skip: "
+if not errorlevel 1 exit /b 0
+if errorlevel 2 exit /b 0
+start "" "%FOUND%" "%~dp0game3-catalogue.html"
 exit /b 0
 
 :removeOldTask
